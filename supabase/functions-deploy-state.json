@@ -2,8 +2,8 @@
   "projectId": "71851426",
   "functions": {
     "assign-hcaptcha": {
-      "hasChanged": false,
-      "hash": "477707be32e1415d6600e9524bdca1c7186a7714eb69cfc7a7543017b8eb16aa"
+      "hasChanged": true,
+      "hash": ""
     },
     "check-device-offline": {
       "hasChanged": false,
@@ -22,8 +22,8 @@
       "hash": "56229ac5841fa5300c20ba236e2b32d3523812a9d866319a2b82bbef3cb68c40"
     },
     "serve-script": {
-      "hasChanged": false,
-      "hash": "5b6af8a6a41565e5d2204943cae2c3e0019459178a2e466c3d86ffb0b87df299"
+      "hasChanged": true,
+      "hash": ""
     },
     "sync-battery": {
       "hasChanged": false,
