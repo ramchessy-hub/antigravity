@@ -1,0 +1,29 @@
+[functions.sync-device]
+verify_jwt = false
+
+[functions.sync-coco]
+verify_jwt = false
+
+[functions.get-coco-balance]
+verify_jwt = false
+
+[functions.check-sol-wallet]
+verify_jwt = false
+
+[functions.check-device-offline]
+verify_jwt = false
+
+[functions.sync-battery]
+verify_jwt = false
+
+[functions.assign-hcaptcha]
+verify_jwt = false
+
+[functions.get-cooldowns]
+verify_jwt = false
+
+[functions.trigger-withdraw]
+verify_jwt = false
+
+[functions.serve-script]
+verify_jwt = false

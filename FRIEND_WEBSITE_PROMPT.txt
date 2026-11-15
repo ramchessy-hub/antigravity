@@ -1,0 +1,298 @@
+FULL BUILD PROMPT: DEVICE BALANCE DASHBOARD FOR DILLI GANESH
+=============================================================
+
+Copy everything below the line into a new bolt.new project.
+Before you start, make sure the new project already has Dilli Ganesh's
+own Supabase connection and his device API (sync endpoints) configured.
+Never paste API keys, secrets, or wallet addresses from any other project.
+
+-------------------------------------------------------------
+
+GOAL
+
+Build a production-ready dashboard that monitors Dilli Ganesh's devices:
+their balances, earnings, claim readiness, cooldown timers, withdrawals,
+and device online/offline status. The dashboard is read-mostly. It is
+fed by his existing device sync API and stored in his Supabase database.
+
+Use a clean, professional design: dark slate background, emerald/teal/cyan
+accents, amber for warnings, red for offline critical alerts. Use lucide-react
+icons. Use Tailwind CSS. Use 8px spacing, 3 font weights maximum, and
+readable contrast everywhere. Do not use purple or violet.
+
+Make the layout fully responsive for mobile and desktop.
+
+-------------------------------------------------------------
+
+STEP 0: ADAPT TO EXISTING API FIRST (MANDATORY)
+
+Before writing UI code:
+1. Inspect Dilli Ganesh's existing Supabase tables, views, and edge
+   functions. List what already exists.
+2. Map his existing column names to the data shapes described below.
+   If his names differ, use his names. Do not rename his database columns.
+3. Do not create duplicate tables for data he already stores.
+4. If a field the dashboard needs is missing, tell me which one and
+   propose the smallest addition (one migration, RLS enabled, grants to
+   anon and authenticated only as his app needs).
+5. Use his existing sync endpoint format. Do not invent a new one.
+
+-------------------------------------------------------------
+
+DATA THE DASHBOARD READS
+
+Devices table (one row per device):
+- device_id (text, unique)
+- display_name (text, optional, user renameable)
+- sort_order (integer, stable device number)
+- last_balance (number, USD)
+- last_seen_at (timestamp, latest heartbeat)
+- updated_at (timestamp)
+- today_earnings (number, IST day)
+- daily_target (number, default 0.16)
+- lifetime_earnings (number)
+- lifetime_withdrawn (number)
+- peak_balance (number)
+- last_withdrawal_at (timestamp)
+- last_withdrawal_amount (number)
+- wait_seconds (integer, seconds until next claim, nullable)
+- wait_time_text (text, raw countdown text from the device, nullable)
+- next_claim_at (timestamp, nullable)
+
+Balance claims table (a claim = a balance increase):
+- id, device_id, previous_balance, new_balance, increase_amount,
+  claimed (boolean), created_at
+
+Device withdrawals table (a withdrawal = a balance drop):
+- id, device_id, previous_balance, new_balance, withdrawal_amount,
+  detected_at
+
+Daily earnings view (per-day totals, IST date):
+- day (date text YYYY-MM-DD in Asia/Kolkata), earnings (number)
+
+Balance reports table (history for the device history drawer):
+- id, device_id, balance, reported_at
+
+Solana wallet checks (only if he uses a crypto wallet; otherwise skip):
+- checked_at, sol_balance, usdc_balance, total_usd_value, sol_price_usd,
+  alert_triggered
+
+Device offline settings and solana alert settings are optional. Include
+them only if he already has a table for alert toggles.
+
+Realtime: subscribe to changes on the devices table so cards update live.
+On connect, do an initial fetch. Also poll every 7 seconds while the tab is
+visible. Pause polling when the tab is hidden and resume on return.
+
+-------------------------------------------------------------
+
+STATUS RULES (IMPORTANT, USE EXACTLY)
+
+- Live: last_seen_at is less than 10 seconds ago. Devices ping about every
+  5 seconds, so one missed ping means offline.
+- Offline: anything else.
+- Inactive badge: updated_at older than 15 minutes.
+- Offline banner: devices offline 4 hours or more.
+- Critical offline alert: devices offline 6.2 hours or more.
+- Define ONE shared set of these constants in one utility file. Every
+  component imports from there. Never hardcode these thresholds elsewhere.
+- Compute live/offline in render from last_seen_at. Do not store it in
+  state, and do not run a per-second tick over the whole list.
+
+COOLDOWN AND READY RULES:
+
+- "Ready to Claim": wait_seconds is 0 or less, OR wait_time_text is
+  "ready", OR next_claim_at is in the past.
+- "Finishing flip": wait_time_text contains both "finish" and "flip"
+  (for example "Finish your flip"). Treat this as COOLDOWN, never as ready.
+  Show it with an amber spinner and the label "Finishing flip".
+- Any other device with a countdown: show the countdown (HH:MM:SS) in
+  amber. Count down locally every second, using next_claim_at when present,
+  otherwise wait_seconds minus elapsed time since updated_at.
+- Show raw wait_time_text as-is when there is no numeric countdown.
+- Stale guard: if a device's data is older than 30 seconds, show
+  "Cooldown unknown" instead of a countdown.
+
+-------------------------------------------------------------
+
+SCREENS AND FEATURES TO BUILD
+
+1. HEADER
+   - Brand name: "Dilli Ganesh" with a Server or similar lucide icon logo.
+   - Last refreshed time.
+   - Live count pill (for example "4 live").
+   - Refresh button. It must never stay stuck spinning. Use
+     Promise.allSettled and a finally block.
+
+2. COMBINED BALANCE HERO
+   - Total balance across devices, shown in USD and in INR.
+     Use 1 USD = 100 INR as the default rate and store it in one constant.
+   - Live and offline counts, total devices.
+   - Daily target progress bar: total today earnings versus
+     devices x daily target. Show percent and "X/Y hit target".
+
+3. DEVICE LIST (main section)
+   - Sorted with live devices first (most recent on top), then by sort_order.
+   - Each row shows: rank, live or offline icon, name, device ID (small,
+     monospace), today's earnings with a progress bar toward the daily target,
+     current balance, withdrawal badge (last withdrawal and lifetime
+     withdrawn), next-claim timer, and a status line ("Live" or
+     "Xh offline" or last seen time).
+   - Filters: All, Ready to Claim, On Cooldown.
+   - Sort: Default order, or Cooldown (soonest first).
+   - Row menu (three dots): Rename (inline edit), History (opens drawer),
+     Delete (with a confirm step).
+   - Rename and delete must check the database error before updating the UI.
+     On failure show a visible error message.
+   - Mobile layout: stacked card. Desktop: single row.
+
+4. DEVICE HISTORY DRAWER
+   - Opens from a row. Shows balance over time from balance_reports, plus
+     claims and withdrawals for that device. Close on Escape or outside click.
+
+5. UPCOMING DEVICES CARD
+   - Ranked list of devices by time until next claim.
+   - Header shows "N ready now" or "Next: <name> in <time>".
+   - Ready devices get a green highlight. "Finishing flip" devices are not
+     counted as ready.
+
+6. CLAIMS FEED
+   - Latest 50 balance claims. Each has amount, device name, time ago.
+   - "Mark claimed" per row and "Clear all". Check the error before updating
+     the UI.
+   - Toast notifications for new unclaimed claims. Maximum 5 at a time.
+     Include a mute toggle saved in localStorage. Persist dismissed toasts
+     in localStorage too.
+
+7. WITHDRAWALS FEED
+   - Latest 50 withdrawals with amount, device, and time.
+   - Total lifetime withdrawn across devices.
+
+8. EARNINGS HISTORY
+   - Period cards: Today, Yesterday, This Week, This Month, This Year.
+   - Compare each period against the prior period with a percent change.
+   - Compute all date boundaries in Asia/Kolkata (IST), using the daily
+     earnings view's "day" string. Do not mix browser-local time with UTC.
+
+9. MISSED CLAIM BANNER (amber, collapsible)
+   - Lists devices that are online and have not claimed for more than
+     2 hours, or are more than 5 minutes past their next_claim_at with no
+     newer claim. Shows total missed expected amount.
+   - Refresh its claim data on the main refresh cycle, not on every device
+     change. Handle query errors visibly.
+
+10. RUN ISSUES BANNER (amber, collapsible)
+    - Devices that are online and "ready" but have no successful claim in the
+      last 10 minutes are flagged as "IP issue".
+    - Devices in "Finishing flip" state are NOT flagged.
+    - Refresh on the main cycle, not on a separate 30-second timer
+      tied to the device list.
+    - Read-only from the browser. Do not write to other tables from the
+      client. If a stale-status cleanup is needed, do it in a server function.
+
+11. DEVICE OFFLINE BANNER (red, collapsible)
+    - Lists devices offline 4 hours or more, sorted by longest offline.
+    - Mark devices offline 6.2 hours or more as ALERT.
+    - Show a mute toggle only if the offline alerts table exists in his project.
+
+12. WITHDRAW READY BANNER (green, only when all conditions are met)
+    - Shows only when every condition is true: a device has at least the
+      withdraw threshold, and any other balances he tracks meet their thresholds.
+      Set thresholds as constants in one file, with defaults he chooses.
+
+13. CONNECTION ERROR BANNER
+    - If the initial device fetch fails, show "Couldn't reach the server" with
+      a Retry button. This is different from an empty state.
+
+14. EMPTY, LOADING, AND ERROR STATES
+    - Loading: skeleton rows, not blank space.
+    - Empty: a friendly message explaining that devices appear after the
+      first sync.
+    - Error: visible message with retry. Never show raw error text.
+
+15. FOOTER
+    - Site uptime since first deployment (store the first deployed time in
+      the database, not in the browser).
+
+16. SOLANA WALLET CARD (only if he uses a wallet)
+    - Shows SOL and USDC balance, total USD value, last checked time.
+    - Wallet address comes from HIS settings, not from anywhere else.
+    - Check the wallet on page load and when the tab regains focus. Do not
+      run a browser timer every minute. The server runs scheduled checks.
+
+-------------------------------------------------------------
+
+DO NOT INCLUDE (EXPLICITLY EXCLUDED)
+
+- Coco / BCD balance cards, Coco API, Coco sync, and all Coco mechanics.
+- Download and setup pages, setup prompts, and script download links.
+- Password lock screen, lock button, device blocking, and fingerprinting.
+- Battery card, battery history drawer, laptop charging indicator, and
+  the battery icon in the header.
+- Privacy mode, screen-hiding overlays, window-blur overlays, and
+  remote-viewer protection of any kind.
+- Office mode toggle.
+- Electricity cost, power consumption, wattage, and unit cost estimator.
+- Batch/cycle rotation badge and cycle history (include only if his setup
+  uses batches; otherwise leave out).
+- Any Electron or desktop wrapper code.
+
+Do not add these back even if the code is tempting to reuse.
+
+-------------------------------------------------------------
+
+SECURITY AND DATA RULES
+
+- Enable Row Level Security on every table. Grant only the roles the app
+  needs. For a no-login dashboard, use anon and authenticated.
+- Use the anon key in the browser only. Never place the service role key in
+  browser code.
+- No write operations from the browser that change device balances,
+  claims, or withdrawals. The device sync API owns those writes.
+- Any action that changes data (rename, delete, mark claimed) must check
+  the returned error before updating the screen.
+- Do not store secrets in the repository. Use the project's existing env file.
+
+-------------------------------------------------------------
+
+DESIGN AND UX DETAILS
+
+- Glass-style cards with subtle borders, soft hover states, and smooth
+  transitions. Respect a reduced-motion preference.
+- Numbers use tabular figures so they do not jump.
+- Every text color must have sufficient contrast on its background.
+- Keep toasts, banners, and drawers consistent in radius and spacing.
+- Keep messages calm and plain. Avoid technical jargon in the UI.
+
+-------------------------------------------------------------
+
+CODE QUALITY RULES
+
+- Use the @/ import alias for project modules.
+- One clear purpose per component file. Split files that grow too large.
+- No duplicated threshold or formatting logic. Put shared helpers in one
+  utility file.
+- Every fetch checks its error and handles empty results.
+- Run the typecheck and build before finishing. Fix all failures.
+
+-------------------------------------------------------------
+
+ACCEPTANCE CHECKLIST
+
+[ ] Connects to Dilli Ganesh's existing Supabase project and reads his data.
+[ ] Device list shows live, offline, ready, cooldown, and "Finishing flip".
+[ ] "Finish your flip" never appears as "Ready to Claim".
+[ ] Rename, delete, and mark-claimed show errors when they fail.
+[ ] Refresh button never gets stuck.
+[ ] Polling pauses when the tab is hidden.
+[ ] Missed claim and run issue banners behave as described.
+[ ] Earnings periods use IST boundaries.
+[ ] No Coco, password, battery, privacy, office, electricity, or download
+    features are present.
+[ ] No API keys or wallet addresses from any other project are present.
+[ ] Layout works on mobile and desktop.
+[ ] Typecheck and build pass.
+
+-------------------------------------------------------------
+
+END OF PROMPT

@@ -1,0 +1,481 @@
+=== COPY EVERYTHING BELOW THIS LINE AS YOUR PROMPT FOR LOVABLE ===
+
+Build a StakeCruncher Device Monitor dashboard — a full-stack web app that monitors MuMu emulator devices running StakeCruncher, tracks balances, earnings, withdrawals, batch cycles, and a Solana wallet, with auto-withdraw triggers and Telegram alerts. This is for my own device farm. I need the COMPLETE app with all features below.
+
+## Tech Stack
+- Vite + React + TypeScript + Tailwind CSS
+- Supabase (database + edge functions + pg_cron)
+- lucide-react for icons
+- No auth/login screen — single-tenant dashboard, anon key access
+
+## Database Schema (run these as Supabase migrations)
+
+### Migration 1: devices + balance_reports
+```sql
+CREATE TABLE IF NOT EXISTS devices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id text UNIQUE NOT NULL,
+  token text,
+  display_name text,
+  sort_order int DEFAULT 999,
+  daily_target numeric DEFAULT 0.16,
+  last_balance numeric,
+  last_seen_at timestamptz,
+  is_online boolean DEFAULT false,
+  today_earnings numeric DEFAULT 0,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_devices" ON devices FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_devices" ON devices FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_devices" ON devices FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_devices" ON devices FOR DELETE TO anon, authenticated USING (true);
+
+CREATE TABLE IF NOT EXISTS balance_reports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id text NOT NULL,
+  balance numeric NOT NULL,
+  reported_at timestamptz DEFAULT now()
+);
+ALTER TABLE balance_reports ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_reports" ON balance_reports FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_reports" ON balance_reports FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_reports" ON balance_reports FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_reports" ON balance_reports FOR DELETE TO anon, authenticated USING (true);
+CREATE INDEX IF NOT EXISTS idx_balance_reports_device_id ON balance_reports(device_id);
+CREATE INDEX IF NOT EXISTS idx_balance_reports_reported_at ON balance_reports(reported_at);
+CREATE INDEX IF NOT EXISTS idx_devices_sort_order ON devices(sort_order);
+```
+
+### Migration 2: coco_balances
+```sql
+CREATE TABLE IF NOT EXISTS coco_balances (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id text UNIQUE NOT NULL,
+  last_balance_text text,
+  last_balance_value numeric,
+  last_seen_at timestamptz,
+  is_online boolean DEFAULT false,
+  today_change numeric DEFAULT 0,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE coco_balances ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_coco" ON coco_balances FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_coco" ON coco_balances FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_coco" ON coco_balances FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_coco" ON coco_balances FOR DELETE TO anon, authenticated USING (true);
+```
+
+### Migration 3: solana_wallet_checks
+```sql
+CREATE TABLE IF NOT EXISTS solana_wallet_checks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_address text NOT NULL,
+  sol_balance numeric,
+  usdc_balance numeric,
+  total_usd_value numeric,
+  sol_price_usd numeric,
+  alert_triggered boolean DEFAULT false,
+  checked_at timestamptz DEFAULT now()
+);
+ALTER TABLE solana_wallet_checks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_sol_checks" ON solana_wallet_checks FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_sol_checks" ON solana_wallet_checks FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_sol_checks" ON solana_wallet_checks FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_sol_checks" ON solana_wallet_checks FOR DELETE TO anon, authenticated USING (true);
+CREATE INDEX IF NOT EXISTS idx_sol_checks_wallet ON solana_wallet_checks(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_sol_checks_checked_at ON solana_wallet_checks(checked_at);
+```
+
+### Migration 4: pg_cron for scheduled Solana wallet checks
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+CREATE EXTENSION IF NOT EXISTS pg_net;
+SELECT cron.schedule('check-sol-wallet-every-minute', '* * * * *', $$
+  SELECT net.http_post(
+    url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/check-sol-wallet',
+    headers := '{"Content-Type": "application/json", "Authorization": "Bearer YOUR_ANON_KEY"}'::jsonb,
+    body := '{}'::jsonb
+  );
+$$);
+```
+
+### Migration 5: daily reset columns
+```sql
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS earnings_date date;
+ALTER TABLE coco_balances ADD COLUMN IF NOT EXISTS change_date date;
+```
+
+### Migration 6: balance_claims
+```sql
+CREATE TABLE IF NOT EXISTS balance_claims (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id text NOT NULL,
+  previous_balance numeric,
+  new_balance numeric,
+  increase_amount numeric,
+  claimed boolean DEFAULT false,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE balance_claims ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_claims" ON balance_claims FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_claims" ON balance_claims FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_claims" ON balance_claims FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_claims" ON balance_claims FOR DELETE TO anon, authenticated USING (true);
+CREATE INDEX IF NOT EXISTS idx_claims_device ON balance_claims(device_id);
+CREATE INDEX IF NOT EXISTS idx_claims_created ON balance_claims(created_at DESC);
+```
+
+### Migration 7: solana_wallet_settings
+```sql
+CREATE TABLE IF NOT EXISTS solana_wallet_settings (
+  id integer PRIMARY KEY DEFAULT 1,
+  alerts_enabled boolean NOT NULL DEFAULT true,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT solana_wallet_settings_singleton CHECK (id = 1)
+);
+INSERT INTO solana_wallet_settings (id, alerts_enabled) VALUES (1, true) ON CONFLICT (id) DO NOTHING;
+ALTER TABLE solana_wallet_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_sol_settings" ON solana_wallet_settings FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_sol_settings" ON solana_wallet_settings FOR INSERT TO anon, authenticated WITH CHECK (id = 1);
+CREATE POLICY "anon_update_sol_settings" ON solana_wallet_settings FOR UPDATE TO anon, authenticated USING (id = 1) WITH CHECK (id = 1);
+CREATE POLICY "anon_delete_sol_settings" ON solana_wallet_settings FOR DELETE TO anon, authenticated USING (false);
+```
+
+### Migration 8: batch/cycle columns + device_withdrawals + cycle_batches
+```sql
+ALTER TABLE devices
+  ADD COLUMN IF NOT EXISTS batch text,
+  ADD COLUMN IF NOT EXISTS lifetime_earnings numeric DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS lifetime_withdrawn numeric DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS peak_balance numeric,
+  ADD COLUMN IF NOT EXISTS batch_active boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS last_withdrawal_at timestamptz,
+  ADD COLUMN IF NOT EXISTS last_withdrawal_amount numeric;
+
+ALTER TABLE coco_balances
+  ADD COLUMN IF NOT EXISTS peak_balance numeric,
+  ADD COLUMN IF NOT EXISTS lifetime_withdrawn numeric DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS last_withdrawal_at timestamptz,
+  ADD COLUMN IF NOT EXISTS last_withdrawal_amount numeric;
+
+CREATE TABLE IF NOT EXISTS device_withdrawals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id text NOT NULL,
+  previous_balance numeric,
+  new_balance numeric,
+  withdrawal_amount numeric,
+  detected_at timestamptz DEFAULT now()
+);
+ALTER TABLE device_withdrawals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_withdrawals" ON device_withdrawals FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_withdrawals" ON device_withdrawals FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_withdrawals" ON device_withdrawals FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_withdrawals" ON device_withdrawals FOR DELETE TO anon, authenticated USING (true);
+CREATE INDEX IF NOT EXISTS idx_device_withdrawals_device_id ON device_withdrawals(device_id);
+CREATE INDEX IF NOT EXISTS idx_device_withdrawals_detected_at ON device_withdrawals(detected_at);
+
+CREATE TABLE IF NOT EXISTS cycle_batches (
+  batch text PRIMARY KEY,
+  device_start int NOT NULL,
+  device_end int NOT NULL,
+  is_current boolean DEFAULT false,
+  started_at timestamptz,
+  ended_at timestamptz,
+  notes text
+);
+ALTER TABLE cycle_batches ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_cycle_batches" ON cycle_batches FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_cycle_batches" ON cycle_batches FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_cycle_batches" ON cycle_batches FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_cycle_batches" ON cycle_batches FOR DELETE TO anon, authenticated USING (true);
+
+INSERT INTO cycle_batches (batch, device_start, device_end, is_current, started_at) VALUES
+  ('A', 1, 6, false, null), ('B', 7, 12, false, null),
+  ('C', 13, 18, false, null), ('D', 19, 24, false, null), ('E', 25, 30, false, null)
+ON CONFLICT (batch) DO NOTHING;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cycle_batches WHERE is_current = true) THEN
+    UPDATE cycle_batches SET is_current = true, started_at = now() WHERE batch = 'A';
+  END IF;
+END $$;
+```
+
+### Migration 9: withdraw_commands + acks
+```sql
+CREATE TABLE IF NOT EXISTS withdraw_commands (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  command_id text UNIQUE NOT NULL,
+  scope text NOT NULL DEFAULT 'all',
+  target_device_id text,
+  status text NOT NULL DEFAULT 'pending',
+  created_at timestamptz DEFAULT now(),
+  picked_up_at timestamptz,
+  executed_at timestamptz,
+  expires_at timestamptz DEFAULT (now() + interval '7 days'),
+  created_by text DEFAULT 'dashboard'
+);
+ALTER TABLE withdraw_commands ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_withdraw_commands" ON withdraw_commands FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_withdraw_commands" ON withdraw_commands FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_withdraw_commands" ON withdraw_commands FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_withdraw_commands" ON withdraw_commands FOR DELETE TO anon, authenticated USING (true);
+CREATE INDEX IF NOT EXISTS idx_withdraw_commands_status ON withdraw_commands(status);
+
+CREATE TABLE IF NOT EXISTS withdraw_command_acks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  command_id text NOT NULL,
+  device_id text NOT NULL,
+  status text NOT NULL,
+  message text,
+  reported_at timestamptz DEFAULT now()
+);
+ALTER TABLE withdraw_command_acks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_withdraw_acks" ON withdraw_command_acks FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_withdraw_acks" ON withdraw_command_acks FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_withdraw_acks" ON withdraw_command_acks FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "anon_delete_withdraw_acks" ON withdraw_command_acks FOR DELETE TO anon, authenticated USING (true);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_withdraw_acks_unique ON withdraw_command_acks(command_id, device_id);
+```
+
+### Migration 10: daily_earnings view
+```sql
+CREATE OR REPLACE VIEW daily_earnings AS
+SELECT
+  date_trunc('day', reported_at AT TIME ZONE 'UTC')::date AS day,
+  device_id,
+  GREATEST(SUM(
+    CASE
+      WHEN balance > LAG(balance) OVER (PARTITION BY device_id ORDER BY reported_at)
+      THEN balance - LAG(balance) OVER (PARTITION BY device_id ORDER BY reported_at)
+      ELSE 0 END
+  ), 0) AS earnings
+FROM balance_reports
+GROUP BY day, device_id;
+```
+
+### Migration 11: controller_heartbeats
+```sql
+CREATE TABLE IF NOT EXISTS controller_heartbeats (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source text UNIQUE NOT NULL,
+  last_seen_at timestamptz NOT NULL
+);
+ALTER TABLE controller_heartbeats ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_heartbeats" ON controller_heartbeats FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_heartbeats" ON controller_heartbeats FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon_update_heartbeats" ON controller_heartbeats FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+INSERT INTO controller_heartbeats (source, last_seen_at) VALUES
+  ('bat_controller', now()), ('tampermonkey', now())
+ON CONFLICT (source) DO NOTHING;
+```
+
+### Migration 12: cycle_history + cycle_counter
+```sql
+CREATE TABLE IF NOT EXISTS cycle_history (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  cycle_number int NOT NULL,
+  batch text NOT NULL,
+  device_start int NOT NULL,
+  device_end int NOT NULL,
+  started_at timestamptz NOT NULL,
+  ended_at timestamptz NOT NULL,
+  duration_seconds double precision NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE cycle_history ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_cycle_history" ON cycle_history FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_insert_cycle_history" ON cycle_history FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE INDEX IF NOT EXISTS idx_cycle_history_created_at ON cycle_history(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS cycle_counter (
+  id integer PRIMARY KEY DEFAULT 1,
+  current_cycle int NOT NULL DEFAULT 1,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT cycle_counter_singleton CHECK (id = 1)
+);
+INSERT INTO cycle_counter (id, current_cycle) VALUES (1, 1) ON CONFLICT (id) DO NOTHING;
+ALTER TABLE cycle_counter ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_select_cycle_counter" ON cycle_counter FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "anon_update_cycle_counter" ON cycle_counter FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+```
+
+## Edge Functions (4 functions, all verify_jwt=false)
+
+### 1. sync-device (POST: device_id + balance number)
+- Upserts device with last_balance, last_seen_at, is_online=true
+- Computes earnings delta (balance up = earnings, balance down = withdrawal)
+- Resets today_earnings if new day (earnings_date check)
+- Updates lifetime_earnings, lifetime_withdrawn, peak_balance, batch (A=1-6, B=7-12, C=13-18, D=19-24, E=25-30)
+- Auto-rotates batch cycle: if no device in current batch is live (last_seen within 5min), advance to next batch (A->B->C->D->E->A)
+- Logs completed cycle to cycle_history, bumps cycle_counter (1..8 wraps)
+- Inserts balance_reports row
+- If balance increased, inserts balance_claims row
+- If balance decreased, inserts device_withdrawals row
+- Upserts controller_heartbeats for 'tampermonkey'
+- Has a DEVICE_ORDER map for sort_order (leave empty for new devices, they auto-assign sort_order=999)
+- CORS headers on all responses
+
+### 2. sync-coco (POST: device_id + balance_text string)
+- Parses numeric value from balance_text
+- Upserts coco_balances with balance text/value, last_seen_at, is_online=true
+- Tracks today_change (positive deltas), resets if new day (change_date)
+- Tracks lifetime_withdrawn, peak_balance, last_withdrawal
+- CORS headers
+
+### 3. check-sol-wallet (POST, called by pg_cron every minute)
+- Fetches SOL balance via Solana RPC (getBalance)
+- Fetches USDC balance via Solana RPC (getTokenAccountsByOwner, USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)
+- Gets SOL price from CoinGecko API
+- Computes total USD value
+- Reads alerts_enabled from solana_wallet_settings
+- Inserts check result into solana_wallet_checks
+- AUTO-WITHDRAW LOGIC (both conditions must be met):
+  Condition 1: USDC balance >= $100
+  Condition 2: At least one device with last_balance >= $0.50
+  When BOTH met:
+    - Send Telegram wallet alert (if alerts_enabled)
+    - For each qualifying device, create per-device withdraw command (scope=single, 7-day expiry)
+    - Send Telegram auto-withdraw alert per device
+    - Skip if device already has pending/picked_up command in last 10 min
+  If only one condition met: no alert, no withdraw
+- Telegram bot token + chat ID hardcoded in function
+- Solana wallet address hardcoded in function
+- CORS headers
+
+### 4. trigger-withdraw (handles create/poll/ack/cancel/bat-poll actions via ?action= param)
+- action=create (POST): dashboard creates withdraw command (scope=all/single/test, 7-day expiry)
+- action=cancel (POST): cancel a command or all pending commands (set status=expired)
+- action=bat-poll (GET): .bat controller polls for newest pending all/test command, atomically marks it picked_up, expires other stale ones, records bat_controller heartbeat
+- action=poll (GET, ?device_id=): Tampermonkey polls for newest pending command matching scope=all OR scope=single+target_device_id, checks if already acked
+- action=ack (POST): Tampermonkey reports picked_up/executed/failed, upserts ack (unique command_id+device_id), updates command status
+- Sweeps expired commands on each poll
+- CORS headers
+
+## Frontend Components
+
+### App.tsx (main dashboard)
+- Auto-refreshes every 10s (devices, coco, sol, claims, withdrawals, earnings, cycle data)
+- Auto-checks Solana wallet every 60s
+- Shows: header with live count + cycle counter badge, refresh button
+- Combined balance hero card with daily target progress bar
+- Coco balance card (BCD balance with INR conversion at 88.50 rate)
+- Claims feed with toast notifications (auto-dismiss 8s, max 5)
+- Cycle history (collapsible, shows 1-8 cycles with live duration timer)
+- Withdraw command center + withdrawals feed side by side
+- Device list (live first, then offline by sort_order)
+- Earnings history (12 period cards: today, yesterday, 7d, 30d, monthly)
+- Solana wallet card (expandable, SOL+USDC, mute toggle, check button)
+- Downloads button (opens password-protected page)
+- Device history drawer (slide-out, shows last 100 balance reports)
+- Device issue banner (warns for devices offline 4h+)
+- Dark theme with glassmorphism, ambient aurora background, emerald/teal/sky palette
+- DAILY_TARGET_PER_DEVICE = 0.16
+- ONLINE_THRESHOLD_MIN = 5
+
+### DeviceRow.tsx
+- Shows rank, live/offline status dot, device name, today's earnings, balance, target progress bar, peak, lifetime earnings, lifetime withdrawn, withdrawal badge
+- Actions: rename, delete, view history, single withdraw
+- TM-connected badge (seen within 2 min)
+- Mobile + desktop responsive layouts
+
+### SolanaWalletCard.tsx
+- Expandable card showing SOL balance, USDC balance, total USD value, SOL price
+- $100 auto-withdraw threshold indicator
+- Mute/unmute Telegram alerts toggle
+- Manual check button
+- Solscan link
+
+### WithdrawCommands.tsx
+- "Withdraw All" button (creates scope=all command)
+- "Test .bat" button (creates scope=test command)
+- Stop/Cancel all button
+- Shows .bat and TM heartbeat status (last seen, online/offline)
+- Per-command list with status, reset capability
+- Polls every 5s
+- Exports SingleWithdrawButton component
+
+### EarningsHistory.tsx
+- 12 period cards (today, yesterday, 7-day, 30-day, last month, 2-12 months ago)
+- Period-over-period percent change indicators
+- Fetches from daily_earnings view
+
+### ClaimsFeed.tsx
+- Lists balance increase events with claim/clear-all actions
+- Unclaimed count badge + total unclaimed amount
+- Mute toggle for toast notifications
+
+### ClaimToast.tsx
+- Toast notifications for new balance increases
+- Auto-dismiss oldest after 8s, max 5 visible
+
+### CocoBalanceCard.tsx
+- BCD balance tracker, shows balance text + numeric value
+- INR conversion (USD_TO_INR = 88.50)
+- Today's change indicator, live/offline status
+
+### CycleHistory.tsx
+- Collapsible batch cycle history (cycles 1-8)
+- Live duration timer for current cycle
+- Per-cycle: batch, device range, duration
+
+### DeviceHistoryDrawer.tsx
+- Slide-out drawer showing last 100 balance_reports
+- Up/down/flat delta indicators
+
+### DeviceIssueBanner.tsx
+- Warning banner for devices offline 4+ hours
+- Expandable list sorted by offline duration
+
+### ProgressBar.tsx
+- Simple progress bar with value/max/color/height props
+
+### DownloadsPage.tsx
+- Password-protected (password: '83410')
+- Auto-downloads: tampermonkey script, .bat controller, setup guide
+- Contains full setup guide text
+
+## Tampermonkey Script (tampermonkey-script.user.js)
+- Idle monitor that runs on all pages (@match *://*/*)
+- Generates a device ID stored in localStorage
+- Intercepts fetch/XHR to capture balance from API responses
+- Polls trigger-withdraw?action=poll every 15s for pending commands
+- When command received: clicks withdraw button, then send USDC button
+- Acks command as picked_up -> executed/failed
+- Syncs balance to sync-device edge function every 30s
+- Small UI overlay (top-left) showing status, API sync, balance
+- Pre-configured with SUPABASE_URL and SUPABASE_ANON_KEY (friend must replace with their own)
+
+## MuMu Master Controller (.bat file)
+- Polls Supabase every 10s for pending withdraw commands
+- 4-option startup menu: Start polling, Force cycle, Enable/Disable Auto-Withdraw, Exit
+- Auto-withdraw enable/disable saved to flag file (withdraw_enabled.flag)
+- When auto-withdraw disabled: logs but skips withdraw commands
+- When triggered: kills MuMu/ADB, restarts, runs StakeCruncher cycle across 30 devices in 5 batches of 6
+- Priority interrupt: if new command arrives mid-cycle, aborts and restarts
+- Smart sleep that checks for commands during waits
+- Pre-configured with SUPABASE_URL and SUPABASE_ANON_KEY (friend must replace with their own)
+
+## Design Requirements
+- Dark theme: base bg #070a12, glassmorphism cards (bg-white/[0.03], border-white/[0.06], backdrop-blur-xl)
+- Ambient aurora background (emerald/sky/teal blurred circles with 18s animation)
+- Grid overlay at 2.5% opacity
+- Font: Inter (400-800 weights) + JetBrains Mono for numbers
+- Color palette: emerald/teal/cyan for primary, sky for secondary, violet for cycle, amber for warnings, red for alerts
+- Tabular numbers for all financial figures (.tnum class)
+- Animations: fade-in, fade-up, pulse-soft, shimmer, aurora, slide-in
+- Responsive: mobile and desktop layouts
+- 8px spacing system
+- Auto-refresh every 10s with live indicator
+
+## What Friend Must Change
+1. Replace YOUR_PROJECT_REF in pg_cron schedule with their Supabase project ref
+2. Replace YOUR_ANON_KEY in pg_cron, Tampermonkey script, and .bat file with their anon key
+3. Replace Solana wallet address in check-sol-wallet edge function and App.tsx
+4. Replace Telegram bot token + chat ID in check-sol-wallet edge function
+5. The DEVICE_ORDER map in sync-device can be left empty — devices auto-assign sort_order=999
+6. Adjust device batch counts in .bat file to match their number of devices
+7. Downloads page password (currently '83410')
+
+=== COPY EVERYTHING ABOVE THIS LINE AS YOUR PROMPT FOR LOVABLE ===

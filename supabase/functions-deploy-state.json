@@ -1,0 +1,45 @@
+{
+  "projectId": "71851426",
+  "functions": {
+    "assign-hcaptcha": {
+      "hasChanged": false,
+      "hash": "477707be32e1415d6600e9524bdca1c7186a7714eb69cfc7a7543017b8eb16aa"
+    },
+    "check-device-offline": {
+      "hasChanged": false,
+      "hash": "d01412961d0c6e91d78dd24d6f353cdef3276a9393ed8110b7ebb7b8093a624e"
+    },
+    "check-sol-wallet": {
+      "hasChanged": false,
+      "hash": "9c16e9f0e1e895f9da3e0f4cdea939a7dc685812f3dddfcf750e12e5b6e5c776"
+    },
+    "get-coco-balance": {
+      "hasChanged": false,
+      "hash": "7d68e0da4fa270520af490f35770122eb9596a81dfe19d41e64ccf2077e25b97"
+    },
+    "get-cooldowns": {
+      "hasChanged": false,
+      "hash": "56229ac5841fa5300c20ba236e2b32d3523812a9d866319a2b82bbef3cb68c40"
+    },
+    "serve-script": {
+      "hasChanged": false,
+      "hash": "5b6af8a6a41565e5d2204943cae2c3e0019459178a2e466c3d86ffb0b87df299"
+    },
+    "sync-battery": {
+      "hasChanged": false,
+      "hash": "0be358d95b66b470b372a64ecf723179ddd33b4c95203c912490b4df56313c81"
+    },
+    "sync-coco": {
+      "hasChanged": false,
+      "hash": "61b52ae02aeeb79e1a969092d952bb7305c4fcb5d42ae3d93cda94f0e4d98199"
+    },
+    "sync-device": {
+      "hasChanged": false,
+      "hash": "815168741f1c9cf92e89cc5585b3e05120b6a944b175056626fbad22b39083d6"
+    },
+    "trigger-withdraw": {
+      "hasChanged": false,
+      "hash": "05482fa562906cef4f2181a3b9fcdce6ed58f76516523efaf623da9790127ef3"
+    }
+  }
+}
