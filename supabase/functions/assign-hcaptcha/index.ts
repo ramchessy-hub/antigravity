@@ -7,7 +7,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey, X-Device-Id",
 };
 
-// Add or remove URLs here anytime — the rotation, Userscript UI, and React Dashboard will auto-adapt!
+// Add or remove links here in the future — rotation and all UIs auto-detect the exact length!
 const HCAPTCHA_URLS: { label: string; url: string }[] = [
   { label: "URL_1",  url: "https://accounts.hcaptcha.com/verify_email/e1e7ee0a-d569-48ea-a826-dd0dda0d438a" },
   { label: "URL_2",  url: "https://accounts.hcaptcha.com/verify_email/fb44ffdf-d83c-4a43-892a-e5bb8bd54027" },
@@ -67,7 +67,6 @@ async function assignUrl(supabase: ReturnType<typeof createClient>, deviceId: st
 
   const usedLabels = new Set((usedToday ?? []).map((r) => String(r.url_label || "").trim()));
 
-  // Finds the first unused URL from 1 to N dynamically
   const available = HCAPTCHA_URLS.find((u) => !usedLabels.has(u.label));
 
   if (!available) {
