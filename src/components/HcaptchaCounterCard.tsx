@@ -14,6 +14,8 @@ type HcaptchaCount = {
   usage?: Record<string, LinkUsage>;
 };
 
+const MIN_CONFIGURED_LINKS = 40;
+
 export function HcaptchaCounterCard() {
   const [data, setData] = useState<HcaptchaCount | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -56,13 +58,18 @@ export function HcaptchaCounterCard() {
 
   const count = data?.count_today ?? 0;
   const completed = data?.completed_today ?? 0;
-  // Dynamically read total_available from API or usage keys (defaults to 40 before first load)
+
+  // Always show at least 40, and automatically grow if backend returns > 40 in the future
   const usageKeys = data?.labels ?? (data?.usage ? Object.keys(data.usage) : []);
-  const total = data?.total_available || usageKeys.length || 40;
+  const total = Math.max(
+    MIN_CONFIGURED_LINKS,
+    data?.total_available ?? 0,
+    usageKeys.length
+  );
   const remaining = Math.max(0, total - count);
 
   const labelList =
-    usageKeys.length > 0
+    usageKeys.length >= total
       ? usageKeys
       : Array.from({ length: total }, (_, i) => `URL_${i + 1}`);
 
