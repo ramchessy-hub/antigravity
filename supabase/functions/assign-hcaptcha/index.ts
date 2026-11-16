@@ -7,7 +7,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey, X-Device-Id",
 };
 
-// Add or remove links here in the future — rotation and all UIs auto-detect the exact length!
 const HCAPTCHA_URLS: { label: string; url: string }[] = [
   { label: "URL_1",  url: "https://accounts.hcaptcha.com/verify_email/e1e7ee0a-d569-48ea-a826-dd0dda0d438a" },
   { label: "URL_2",  url: "https://accounts.hcaptcha.com/verify_email/fb44ffdf-d83c-4a43-892a-e5bb8bd54027" },
@@ -58,25 +57,33 @@ function todayStart(): string {
 }
 
 async function assignUrl(supabase: ReturnType<typeof createClient>, deviceId: string) {
-  const todayStartIso = todayStart();
-  const { data: usedToday } = await supabase
-    .from("hcaptcha_assignments")
-    .select("url_label")
-    .gte("assigned_at", todayStartIso)
-    .in("status", ["assigned", "completed"]);
-
-  const usedLabels = new Set((usedToday ?? []).map((r) => String(r.url_label || "").trim()));
-
-  const available = HCAPTCHA_URLS.find((u) => !usedLabels.has(u.label));
-
-  if (!available) {
-    return { error: "no_urls_available", total_available: HCAPTCHA_URLS.length };
+  if (HCAPTCHA_URLS.length === 0) {
+    return { error: "no_urls_available" };
   }
 
+  // Get the most recently assigned row to rotate sequentially: 1 -> 2 -> ... -> N -> 1
+  const { data: lastRow } = await supabase
+    .from("hcaptcha_assignments")
+    .select("url_label")
+    .order("assigned_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let nextIndex = 0;
+  if (lastRow?.url_label) {
+    const lastLabel = String(lastRow.url_label).trim();
+    const lastIdx = HCAPTCHA_URLS.findIndex((u) => u.label === lastLabel);
+    if (lastIdx !== -1) {
+      nextIndex = (lastIdx + 1) % HCAPTCHA_URLS.length;
+    }
+  }
+
+  const selected = HCAPTCHA_URLS[nextIndex];
   const now = new Date().toISOString();
+
   const { error: insertError } = await supabase.from("hcaptcha_assignments").insert({
     device_id: deviceId,
-    url_label: available.label,
+    url_label: selected.label,
     assigned_at: now,
     status: "assigned",
   });
@@ -86,20 +93,32 @@ async function assignUrl(supabase: ReturnType<typeof createClient>, deviceId: st
   }
 
   return {
-    url: available.url,
-    label: available.label,
+    url: selected.url,
+    label: selected.label,
     total_available: HCAPTCHA_URLS.length,
   };
 }
 
 async function completeAssignment(supabase: ReturnType<typeof createClient>, deviceId: string, label: string) {
   const now = new Date().toISOString();
+  const { data: latest } = await supabase
+    .from("hcaptcha_assignments")
+    .select("id")
+    .eq("device_id", deviceId)
+    .eq("url_label", label)
+    .eq("status", "assigned")
+    .order("assigned_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!latest) {
+    return { ok: true };
+  }
+
   const { error } = await supabase
     .from("hcaptcha_assignments")
     .update({ completed_at: now, status: "completed" })
-    .eq("device_id", deviceId)
-    .eq("url_label", label)
-    .eq("status", "assigned");
+    .eq("id", latest.id);
 
   if (error) {
     return { error: "failed_to_complete" };
@@ -185,7 +204,7 @@ Deno.serve(async (req: Request) => {
         );
       }
       const result = await assignUrl(supabase, device_id);
-      const status = result.error ? (result.error === "no_urls_available" ? 404 : 500) : 200;
+      const status = result.error ? 500 : 200;
       return new Response(
         JSON.stringify(result),
         { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
