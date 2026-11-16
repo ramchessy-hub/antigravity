@@ -22,8 +22,8 @@
       "hash": "56229ac5841fa5300c20ba236e2b32d3523812a9d866319a2b82bbef3cb68c40"
     },
     "serve-script": {
-      "hasChanged": true,
-      "hash": ""
+      "hasChanged": false,
+      "hash": "5b6af8a6a41565e5d2204943cae2c3e0019459178a2e466c3d86ffb0b87df299"
     },
     "sync-battery": {
       "hasChanged": false,
