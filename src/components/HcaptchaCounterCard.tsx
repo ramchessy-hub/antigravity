@@ -45,7 +45,6 @@ export function HcaptchaCounterCard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -59,14 +58,12 @@ export function HcaptchaCounterCard() {
   const count = data?.count_today ?? 0;
   const completed = data?.completed_today ?? 0;
 
-  // Always show at least 40, and automatically grow if backend returns > 40 in the future
   const usageKeys = data?.labels ?? (data?.usage ? Object.keys(data.usage) : []);
   const total = Math.max(
     MIN_CONFIGURED_LINKS,
     data?.total_available ?? 0,
     usageKeys.length
   );
-  const remaining = Math.max(0, total - count);
 
   const labelList =
     usageKeys.length >= total
@@ -78,7 +75,7 @@ export function HcaptchaCounterCard() {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-white/[0.08] bg-white/[0.03] transition-all hover:bg-white/[0.08] cursor-pointer"
-        title={`hCaptcha requests today: ${count}/${total} used, ${completed} completed`}
+        title={`hCaptcha requests today: ${count} used across ${total} links, ${completed} completed`}
       >
         <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
         <span className="text-[11px] font-semibold text-slate-100 tnum">
@@ -89,25 +86,14 @@ export function HcaptchaCounterCard() {
             {completed} done
           </span>
         )}
-        {remaining <= 5 && remaining > 0 && (
-          <span className="text-[9px] sm:text-[10px] font-medium text-amber-300/70">
-            {remaining} left
-          </span>
-        )}
-        {remaining === 0 && (
-          <span className="text-[9px] sm:text-[10px] font-medium text-rose-300/70">
-            max
-          </span>
-        )}
         <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Expanded Link Usage Dropdown Panel */}
       {isOpen && (
         <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col">
           <div className="px-3 py-2 bg-slate-800/60 border-b border-slate-700/50 flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-200">
-              hCaptcha Link Rotation (1–{total})
+              hCaptcha Rotation (1–{total})
             </span>
             <span className="text-[10px] font-medium text-sky-400 bg-sky-950/50 px-2 py-0.5 rounded-full border border-sky-800/40">
               {completed}/{count} Completed
@@ -150,7 +136,7 @@ export function HcaptchaCounterCard() {
           </div>
 
           <div className="px-3 py-1.5 bg-slate-950/60 border-t border-slate-800/50 text-[10px] text-slate-400 text-center">
-            Resets daily at 00:00 IST
+            Continuous loop · Daily stats reset at 00:00 IST
           </div>
         </div>
       )}
