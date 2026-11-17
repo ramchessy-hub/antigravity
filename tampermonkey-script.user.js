@@ -1,751 +1,314 @@
 // ==UserScript==
-// @name         StakeCruncher Ultimate Tracker + Remote Withdraw
+// @name         hCaptcha Challenge → Aggressive 1-40 Rotation (Cloud + Local Failover)
 // @namespace    http://tampermonkey.net/
-// @version      9.1
-// @description  All-in-one: DOM balance reading, API balance interception, countdown timer tracking, remote withdraw commands, auto-reload on "finish your flip", get-cooldowns integration. Install on every device.
-// @downloadURL  https://ekjivkdpczvamcysmxlr.supabase.co/functions/v1/serve-script
-// @updateURL    https://ekjivkdpczvamcysmxlr.supabase.co/functions/v1/serve-script
-// @match        *://*.stakecruncher.com/*
+// @version      5.0
+// @description  Aggressive 1-40 continuous rotation with instant redirect and local failover
+// @author       You
 // @match        *://stakecruncher.com/*
-// @exclude      https://*.hcaptcha.com/*
-// @exclude      https://hcaptcha.com/*
-// @exclude      *://*.hcaptcha.com/*
-// @exclude      *://hcaptcha.com/*
-// @exclude      *://*.discord.com/*
-// @exclude      *://discord.com/*
-// @grant        GM_xmlhttpRequest
-// @grant        unsafeWindow
+// @match        *://*.stakecruncher.com/*
+// @match        *://accounts.hcaptcha.com/*
+// @match        *://dashboard.hcaptcha.com/*
+// @match        *://*.hcaptcha.com/*
 // @connect      ekjivkdpczvamcysmxlr.supabase.co
-// @run-at       document-start
-// @noframes
-// ==UserScript==
+// @grant        GM_xmlhttpRequest
+// @run-at       document-idle
+// ==/UserScript==
 
 (function () {
     'use strict';
 
-    // Only run in the top frame — iframes send balance 0 / "None" and overwrite real data
-    if (window.top !== window.self) return;
-
-    const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-
-    // ============================================================
-    // CONFIG
-    // ============================================================
     const SUPABASE_URL = 'https://ekjivkdpczvamcysmxlr.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVraml2a2RwY3p2YW1jeXNteGxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0OTE4MzEsImV4cCI6MjEwNzA2NzgzMX0.SKez8C6cPipQyZ5NRQzPqAmBusxzQT2b20Ly03tCYkI';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3QiOiJzdXBhYmFzZSIsInJlZiI6ImVraml2a2RwY3p2YW1jeXNteGxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0OTE4MzEsImV4cCI6MjEwNzA2NzgzMX0.SKez8C6cPipQyZ5NRQzPqAmBusxzQT2b20Ly03tCYkI';
 
-    const SYNC_INTERVAL_MS = 5000;        // sync balance + cooldown every 5s
-    const COMMAND_POLL_INTERVAL_MS = 10000; // poll for withdraw commands every 10s
-    const DETECT_INTERVAL_MS = 2000;       // re-scan DOM for balance/timer every 2s
-    const FLIP_CHECK_INTERVAL_MS = 3000;   // check for "finish your flip" every 3s
-    const RELOAD_COOLDOWN_MS = 60000;      // never reload more than once a minute
-    const STEP1_DELAY = 3000;              // wait before clicking withdraw button
-    const STEP2_DELAY = 2000;              // wait between withdraw click and send click
-    const MAX_TEXT_LEN = 80;               // ignore large container elements when scanning text
-    const INITIAL_WAIT_MS = 6000;          // wait for page to load before first scan
+    const FALLBACK_URLS = [
+        { label: "URL_1",  url: "https://accounts.hcaptcha.com/verify_email/e1e7ee0a-d569-48ea-a826-dd0dda0d438a" },
+        { label: "URL_2",  url: "https://accounts.hcaptcha.com/verify_email/fb44ffdf-d83c-4a43-892a-e5bb8bd54027" },
+        { label: "URL_3",  url: "https://accounts.hcaptcha.com/verify_email/43361230-bf41-4ba9-9041-5f0d53056ae8" },
+        { label: "URL_4",  url: "https://accounts.hcaptcha.com/verify_email/302f6237-c995-46ce-ae10-33e83be3baf0" },
+        { label: "URL_5",  url: "https://accounts.hcaptcha.com/verify_email/cb076e26-7e02-4021-a008-e6a8b2375906" },
+        { label: "URL_6",  url: "https://accounts.hcaptcha.com/verify_email/f64f66ba-ceaa-430d-951d-913ab2497fa9" },
+        { label: "URL_7",  url: "https://accounts.hcaptcha.com/verify_email/9f50283e-d840-40b4-a675-82dd142921cc" },
+        { label: "URL_8",  url: "https://accounts.hcaptcha.com/verify_email/401a44ac-d296-456f-9167-ed167fa7913d" },
+        { label: "URL_9",  url: "https://accounts.hcaptcha.com/verify_email/14246df8-bba3-4d8a-9466-08e2d457bfd5" },
+        { label: "URL_10", url: "https://accounts.hcaptcha.com/verify_email/6a533eb7-0dd9-583a-aa4e-f549f387761f" },
+        { label: "URL_11", url: "https://accounts.hcaptcha.com/verify_email/3d52861f-1195-4df7-b370-184f5157b4c7" },
+        { label: "URL_12", url: "https://accounts.hcaptcha.com/verify_email/c45951ab-5c2e-4c02-81ca-8a1cad9b290f" },
+        { label: "URL_13", url: "https://accounts.hcaptcha.com/verify_email/d713d486-c973-4263-8892-d8285542a1a4" },
+        { label: "URL_14", url: "https://accounts.hcaptcha.com/verify_email/63fd95b5-0851-4ef9-9c68-aab84627aeac" },
+        { label: "URL_15", url: "https://accounts.hcaptcha.com/verify_email/0ac3f3e5-8e1a-4fbe-8df2-25a5a5428aa1" },
+        { label: "URL_16", url: "https://accounts.hcaptcha.com/verify_email/8650b147-1ed8-46a8-9464-9179e9d088b4" },
+        { label: "URL_17", url: "https://accounts.hcaptcha.com/verify_email/6adc58eb-0bc5-f526-040a-8df54193ba82" },
+        { label: "URL_18", url: "https://accounts.hcaptcha.com/verify_email/ba244034-c494-4790-8d80-f35b57d6aa16" },
+        { label: "URL_19", url: "https://accounts.hcaptcha.com/verify_email/f33c2027-21aa-442f-91dd-45006c593a67" },
+        { label: "URL_20", url: "https://accounts.hcaptcha.com/verify_email/8e35bc66-3907-4c65-9e59-d44374508daf" },
+        { label: "URL_21", url: "https://accounts.hcaptcha.com/verify_email/954250c0-ea58-4e66-aad4-9127e90eb160" },
+        { label: "URL_22", url: "https://accounts.hcaptcha.com/verify_email/f1a4760f-8bf1-4e2e-928e-5576f9a232df" },
+        { label: "URL_23", url: "https://accounts.hcaptcha.com/verify_email/1de3b9c0-6087-443b-9d7d-25159a2d6e79" },
+        { label: "URL_24", url: "https://accounts.hcaptcha.com/verify_email/6af4f57b-3139-e3a8-e05e-2860d887aecd" },
+        { label: "URL_25", url: "https://accounts.hcaptcha.com/verify_email/ac173a84-82ef-47e3-b4ca-f88d5e1df109" },
+        { label: "URL_26", url: "https://accounts.hcaptcha.com/verify_email/9ec84a95-e41e-4960-b699-235250c589a3" },
+        { label: "URL_27", url: "https://accounts.hcaptcha.com/verify_email/6af50e79-6101-02be-2f91-82241ed50883" },
+        { label: "URL_28", url: "https://accounts.hcaptcha.com/verify_email/d7884703-ac06-4115-ae94-47c4af363b88" },
+        { label: "URL_29", url: "https://accounts.hcaptcha.com/verify_email/6af77c7c-e263-4fd4-58c2-f894ad730456" },
+        { label: "URL_30", url: "https://accounts.hcaptcha.com/verify_email/6af90d1d-1a25-cef5-3f0a-ecb65d840f68" },
+        { label: "URL_31", url: "https://accounts.hcaptcha.com/verify_email/6b268b70-cb1e-4bdb-b9ae-7a75ac67c45d" },
+        { label: "URL_32", url: "https://accounts.hcaptcha.com/verify_email/0c71af4f-8b61-4f4b-962c-d08235d8b2e9" },
+        { label: "URL_33", url: "https://accounts.hcaptcha.com/verify_email/ec4533c8-b91a-4a0f-90c8-df98d6c3ca6d" },
+        { label: "URL_34", url: "https://accounts.hcaptcha.com/verify_email/b1e66167-da72-4e07-bd3a-af09ebe9da19" },
+        { label: "URL_35", url: "https://accounts.hcaptcha.com/verify_email/ad572904-0415-4a14-9818-f21e303150f7" },
+        { label: "URL_36", url: "https://accounts.hcaptcha.com/verify_email/c37aa11d-1291-4e40-8a83-8e7a13c9ccb6" },
+        { label: "URL_37", url: "https://accounts.hcaptcha.com/verify_email/f1e18359-b4a8-45b7-877d-70b6e9667049" },
+        { label: "URL_38", url: "https://accounts.hcaptcha.com/verify_email/6aebcd63-8921-5b09-3ff6-55c0e53653f6" },
+        { label: "URL_39", url: "https://accounts.hcaptcha.com/verify_email/3c4347dc-9bc3-49b2-a95e-77257e349901" },
+        { label: "URL_40", url: "https://accounts.hcaptcha.com/verify_email/7f42fe13-9445-4516-a0b5-7547832fce83" },
+    ];
 
-    const FLIP_TRIGGERS = [/finish\s+your\s+flip/i, /flip\s+to\s+finish/i, /finish\s+to\s+flip/i];
+    let deviceId = localStorage.getItem('sc_device_id');
+    if (!deviceId) {
+        deviceId = Math.random().toString(36).slice(2, 10);
+        localStorage.setItem('sc_device_id', deviceId);
+    }
+    const DEVICE_ID = 'device-' + deviceId;
 
-    const UI_ID = 'scv9-panel';
+    const RETURN_URL = 'https://stakecruncher.com';
+    const COOLDOWN_MS = 8000;      // Aggressive 8s re-trigger window
+    const REDIRECT_DELAY_MS = 800; // Instant 0.8s redirect once assigned
+    const WAIT_MS = 60000;         // 60s verification hold
 
-    // ============================================================
-    // DEVICE ID — robust persistence (localStorage → sessionStorage → cookie)
-    // ============================================================
-    function getOrCreateDeviceId() {
-        const KEY = 'sc_device_id';
-        const sanitize = v => String(v || '').replace(/[^a-z0-9]/gi, '').slice(0, 12);
-        const persist = id => {
-            try { localStorage.setItem(KEY, id); } catch (_) {}
-            try { sessionStorage.setItem(KEY, id); } catch (_) {}
-            try {
-                const d = new Date(); d.setFullYear(d.getFullYear() + 1);
-                document.cookie = `${KEY}=${id}; expires=${d.toUTCString()}; path=/; SameSite=Lax`;
-            } catch (_) {}
-        };
+    let lastTrigger = 0;
 
-        try { const v = sanitize(localStorage.getItem(KEY)); if (v) return 'device-' + v; } catch (_) {}
-        try {
-            const v = sanitize(sessionStorage.getItem(KEY));
-            if (v) { try { localStorage.setItem(KEY, v); } catch (_) {} return 'device-' + v; }
-        } catch (_) {}
-        try {
-            const m = document.cookie.match(new RegExp('(?:^|; )' + KEY + '=([^;]+)'));
-            if (m) { const v = sanitize(m[1]); if (v) { try { localStorage.setItem(KEY, v); } catch (_) {} return 'device-' + v; } }
-        } catch (_) {}
-        const fresh = Math.random().toString(36).slice(2, 10);
-        persist(fresh);
-        return 'device-' + fresh;
+    function getLocalFallbackUrl() {
+        let idx = parseInt(localStorage.getItem('hcap_local_rot_idx') || '0', 10);
+        if (isNaN(idx) || idx < 0 || idx >= FALLBACK_URLS.length) idx = 0;
+        const chosen = FALLBACK_URLS[idx];
+        localStorage.setItem('hcap_local_rot_idx', String((idx + 1) % FALLBACK_URLS.length));
+        return chosen;
     }
 
-    const DEVICE_ID = getOrCreateDeviceId();
-    console.log('%c[SC v9.1] Device ID: %c' + DEVICE_ID,
-        'color:#38bdf8;font-weight:bold', 'color:#4ade80;font-weight:bold;font-size:13px');
-
-    // ============================================================
-    // STATE
-    // ============================================================
-    const state = {
-        lastSeenBalance: null,      // balance from API interception
-        domBalance: null,           // balance from DOM scanning
-        waitSeconds: null,          // seconds until next claim
-        waitTimeText: null,         // raw countdown text
-        isProcessing: false,        // true while running withdraw steps
-        currentCommandId: null,     // active withdraw command ID
-        apiSynced: false,           // true after first successful API 200
-        isReloading: false,         // true while a reload is pending
-    };
-
-    let lastGoodBalance = 0;
-
-    // ============================================================
-    // DOM HELPERS
-    // ============================================================
-
-    // Returns the SHORTEST element whose text passes `test`.
-    function findText(test, selector) {
-        const els = document.querySelectorAll(selector || 'button, div, span, p, a, h1, h2, h3, h4, time, small, code, label');
-        let best = null;
-        for (const el of els) {
-            if (el.id && el.id.startsWith('scv9-')) continue; // skip our own overlay
-            const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
-            if (!txt || txt.length > MAX_TEXT_LEN) continue;
-            if (!test(txt)) continue;
-            if (!best || txt.length < best.length) best = { el, txt, length: txt.length };
+    function showStatus(text, color = '#10b981') {
+        let el = document.getElementById('hcap-lite-status');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'hcap-lite-status';
+            el.style.cssText = `
+                position: fixed;
+                bottom: 16px;
+                right: 16px;
+                background: #0f172a;
+                color: white;
+                padding: 10px 14px;
+                border-radius: 8px;
+                font-family: system-ui, sans-serif;
+                font-size: 13px;
+                font-weight: 600;
+                z-index: 2147483646;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                border: 1px solid #1e293b;
+                max-width: 340px;
+            `;
+            document.documentElement.appendChild(el);
         }
-        return best;
-    }
-
-    function toNumber(str) {
-        const n = parseFloat(String(str).replace(/[$,\s]/g, ''));
-        return isNaN(n) ? null : n;
-    }
-
-    // Read balance from the DOM. Returns a number or null.
-    // Tries multiple strategies so it works even if the page layout changes.
-    function getDomBalance() {
-        const numRegex = /^\$?\s?[\d,]+(\.\d{1,8})?$/;
-
-        // 1) element that is only a decimal number, e.g. "$0.0123"
-        const decimal = findText(t => numRegex.test(t) && t.includes('.'));
-        if (decimal) {
-            const n = toNumber(decimal.txt);
-            if (n !== null && n >= 0) return n;
+        const statusTextEl = document.getElementById('hcap-status-text');
+        if (statusTextEl) {
+            statusTextEl.textContent = text;
+        } else {
+            el.innerHTML = `<div id="hcap-status-text" style="margin-bottom: 6px;">${text}</div><div id="hcap-stats-box" style="font-size: 11px; color: #94a3b8; max-height: 120px; overflow-y: auto; border-top: 1px solid #1e293b; padding-top: 6px;">Loading 1–40 stats...</div>`;
         }
+        el.style.borderColor = color;
+    }
 
-        // 2) element that mentions "balance" and has a number
-        const labeled = findText(t => /balance/i.test(t) && /\d/.test(t));
-        if (labeled) {
-            const m = labeled.txt.match(/\$?\s?([\d,]+(?:\.\d+)?)/);
-            if (m) {
-                const n = toNumber(m[1]);
-                if (n !== null && n >= 0) return n;
-            }
+    function updateStatsUI(data) {
+        const statsBox = document.getElementById('hcap-stats-box');
+        if (!statsBox) return;
+
+        const usage = (data && data.usage) || {};
+        const totalAvailable = Math.max(40, data?.total_available || 0, Object.keys(usage).length);
+        const countToday = data?.count_today ?? 0;
+        const completedToday = data?.completed_today ?? 0;
+        const cycle = Math.floor(countToday / totalAvailable) + 1;
+
+        let html = `<div style="font-weight: bold; margin-bottom: 4px; color: #e2e8f0;">Today: ${countToday}/${totalAvailable} · Cycle ${cycle} (${completedToday} done)</div>`;
+        html += `<table style="width: 100%; border-collapse: collapse; font-size: 11px;">`;
+        html += `<tr style="border-bottom: 1px solid #334155; text-align: left;"><th style="padding: 2px;">Link</th><th style="padding: 2px;">Used</th><th style="padding: 2px;">Done</th></tr>`;
+
+        for (let i = 1; i <= totalAvailable; i++) {
+            const label = `URL_${i}`;
+            const stats = usage[label] || { assigned: 0, completed: 0 };
+            const color = stats.assigned > 0 ? '#38bdf8' : '#64748b';
+            html += `<tr><td style="padding: 2px; color: ${color};">${label}</td><td style="padding: 2px;">${stats.assigned}x</td><td style="padding: 2px;">${stats.completed}</td></tr>`;
         }
-
-        // 3) element that is only an integer
-        const integer = findText(t => numRegex.test(t));
-        if (integer) {
-            const n = toNumber(integer.txt);
-            if (n !== null && n >= 0) return n;
-        }
-
-        return null;
+        html += `</table>`;
+        statsBox.innerHTML = html;
     }
 
-    // Parse a countdown string into seconds.
-    function parseWaitTextToSeconds(txt) {
-        if (!txt) return null;
-        const s = String(txt).trim();
-
-        // H:MM:SS or MM:SS
-        const m1 = s.match(/(\d{1,3}):(\d{2}):(\d{2})/);
-        if (m1) return parseInt(m1[1], 10) * 3600 + parseInt(m1[2], 10) * 60 + parseInt(m1[3], 10);
-        const m2 = s.match(/(\d{1,3}):(\d{2})/);
-        if (m2) return parseInt(m2[1], 10) * 60 + parseInt(m2[2], 10);
-
-        // 2h 5m 3s / 2 hours 5 minutes / 45s / 2h
-        let total = 0; let hit = false;
-        const h = s.match(/(\d+)\s*h(?:ours?|rs?)?\b/i);
-        const mn = s.match(/(\d+)\s*m(?:in(?:ute)?s?)?\b/i);
-        const sec = s.match(/(\d+)\s*s(?:ec(?:ond)?s?)?\b/i);
-        if (h) { total += parseInt(h[1], 10) * 3600; hit = true; }
-        if (mn) { total += parseInt(mn[1], 10) * 60; hit = true; }
-        if (sec) { total += parseInt(sec[1], 10); hit = true; }
-        return hit ? total : null;
-    }
-
-    // Detect cooldown / wait time from the page.
-    // Priority: "Claim your drop" / "Ready" text → wait_seconds = 0
-    //           "Next drip in HH:MM:SS" → parsed seconds
-    //           Withdraw button present & enabled → wait_seconds = 0
-    function detectWaitTime() {
-        try {
-            // Check for "claim your drop" / "ready" text
-            const claim = findText(t => /claim\s+your\s+drop/i.test(t) || /^ready$/i.test(t) || /ready\s+now/i.test(t));
-            if (claim) {
-                state.waitTimeText = claim.txt;
-                state.waitSeconds = 0;
-                return;
-            }
-
-            // Check for "next drip in" countdown
-            const drip = findText(t => /next\s+drip\s+in/i.test(t) && /\d/.test(t));
-            if (drip) {
-                const sec = parseWaitTextToSeconds(drip.txt);
-                if (sec !== null && sec >= 0) {
-                    state.waitTimeText = drip.txt;
-                    state.waitSeconds = sec;
-                    return;
-                }
-            }
-
-            // Check for any countdown-like text near a withdraw/claim button
-            const btn = getWithdrawBtn();
-            if (btn) {
-                const root = btn.closest('div, section, form, main') || document.body;
-                const candidates = root.querySelectorAll('div, span, p, time, small, code, h1, h2, h3, h4');
-                let bestText = null;
-                let bestSeconds = -1;
-                for (const el of candidates) {
-                    if (el.id && el.id.startsWith('scv9-')) continue;
-                    const txt = (el.innerText || el.textContent || '').trim();
-                    if (!txt || txt.length > 24) continue;
-                    if (/\d{1,3}:\d{2}(:\d{2})?/.test(txt) || /\d+\s*[hms]/i.test(txt)) {
-                        const sec = parseWaitTextToSeconds(txt);
-                        if (sec !== null && sec > bestSeconds && sec < 86400) {
-                            bestSeconds = sec;
-                            bestText = txt;
-                        }
-                    }
-                }
-                if (bestText !== null) {
-                    state.waitTimeText = bestText;
-                    state.waitSeconds = bestSeconds;
-                    return;
-                }
-
-                // Button is present and enabled = ready to claim
-                if (!btn.disabled) {
-                    state.waitTimeText = 'Ready';
-                    state.waitSeconds = 0;
-                    return;
-                }
-            }
-
-            // Check for "finish your flip" — long cooldown
-            const flip = findText(t => /finish\s+(your\s+)?flip/i.test(t) || /flip\s+to\s+finish/i.test(t));
-            if (flip) {
-                state.waitTimeText = flip.txt;
-                state.waitSeconds = 3 * 60 * 60; // 3 hours
-                return;
-            }
-
-            // Check for "access restricted" network error
-            const restricted = findText(t => /access\s+restricted\s+from\s+this\s+network/i.test(t));
-            if (restricted) {
-                state.waitTimeText = 'Access restricted from this network';
-                state.waitSeconds = null;
-                reportNetworkError(restricted.txt);
-                return;
-            }
-        } catch (_) {}
-    }
-
-    // Scan DOM for balance + timer — called every DETECT_INTERVAL_MS
-    function scanDOM() {
-        if (state.isReloading) return;
-
-        // Balance
-        const found = getDomBalance();
-        if (found !== null) {
-            state.domBalance = found;
-            lastGoodBalance = found;
-        }
-
-        // Wait time
-        detectWaitTime();
-    }
-
-    // ============================================================
-    // API INTERCEPTOR (captures balance from fetch/XHR responses)
-    // ============================================================
-    function isValidApiCall(url) {
-        if (!url || typeof url !== 'string') return false;
-        if (/\.(png|jpg|jpeg|svg|css|js|woff2?|ico|gif|webp|map)(\?|#|$)/i.test(url)) return false;
-        if (/google-analytics|googletagmanager|sentry|cloudflare|hotjar|facebook|segment/i.test(url)) return false;
-        if (url.includes('supabase.co')) return false;
-        return true;
-    }
-
-    function extractBalance(body) {
-        if (!body || typeof body !== 'object') return null;
-        const candidates = [
-            body.balance, body.amount, body.total, body.value,
-            body.data?.balance, body.data?.amount, body.data?.total, body.data?.value,
-            body.result?.balance, body.result?.amount, body.result?.total, body.result?.value,
-        ];
-        for (const c of candidates) {
-            if (typeof c === 'number' && c >= 0) return c;
-        }
-        return null;
-    }
-
-    function recordApiSuccess(url, status) {
-        if (!isValidApiCall(url)) return;
-        if (status >= 200 && status < 300) {
-            state.apiSynced = true;
-        }
-    }
-
-    const origFetch = pageWindow.fetch;
-    if (origFetch) {
-        pageWindow.fetch = async function (...args) {
-            const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
-            try {
-                const response = await origFetch.apply(this, args);
-                if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+    function apiRequest(endpoint, payload) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: payload ? 'POST' : 'GET',
+                url: `${SUPABASE_URL}/functions/v1/assign-hcaptcha${endpoint}`,
+                timeout: 6000,
+                headers: {
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                data: payload ? JSON.stringify(payload) : undefined,
+                onload: (response) => {
                     try {
-                        response.clone().json().then(b => {
-                            const bal = extractBalance(b);
-                            if (typeof bal === 'number' && bal >= 0) {
-                                state.lastSeenBalance = bal;
-                                lastGoodBalance = bal;
-                            }
-                        }).catch(() => { });
-                    } catch (_) { }
-                }
-                recordApiSuccess(url, response.status);
-                return response;
-            } catch (err) { throw err; }
-        };
-    }
-
-    const origOpen = pageWindow.XMLHttpRequest.prototype.open;
-    pageWindow.XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-        this._scv9Url = String(url);
-        this.addEventListener('load', () => {
-            recordApiSuccess(this._scv9Url, this.status);
-            try {
-                if (this.status >= 200 && this.status < 300) {
-                    const ct = this.getResponseHeader('content-type') || '';
-                    if (ct.includes('application/json')) {
-                        const body = JSON.parse(this.responseText);
-                        const bal = extractBalance(body);
-                        if (typeof bal === 'number' && bal >= 0) {
-                            state.lastSeenBalance = bal;
-                            lastGoodBalance = bal;
+                        const data = JSON.parse(response.responseText);
+                        if (response.status >= 200 && response.status < 300 && !data.error) {
+                            resolve(data);
+                        } else {
+                            reject(new Error(data.error || `HTTP ${response.status}`));
                         }
+                    } catch {
+                        reject(new Error('Invalid JSON response'));
                     }
-                }
-            } catch (_) { }
-        });
-        return origOpen.call(this, method, url, ...rest);
-    };
-
-    // ============================================================
-    // CLICK HELPERS
-    // ============================================================
-    function triggerClick(btn) {
-        if (!btn) return;
-        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type =>
-            btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: pageWindow }))
-        );
-    }
-
-    function getWithdrawBtn() {
-        return document.querySelector('button.faucet-withdraw-btn')
-            || document.querySelector('button[class*="withdraw"]')
-            || [...document.querySelectorAll('button')].find(b => {
-                const t = (b.innerText || b.textContent || '').trim().toLowerCase();
-                return t.includes('withdraw') && !t.includes('send');
+                },
+                onerror: () => reject(new Error('Network error')),
+                ontimeout: () => reject(new Error('Request timeout'))
             });
-    }
-
-    function getSendBtn() {
-        return [...document.querySelectorAll('button')].find(b => {
-            const t = (b.innerText || b.textContent || '').trim();
-            return t.includes('Send') && t.includes('USDC');
         });
     }
 
-    // ============================================================
-    // WITHDRAW COMMAND FLOW (Step 1 → Step 2)
-    // ============================================================
-    function resetToIdle() {
-        state.isProcessing = false;
-        state.currentCommandId = null;
+    async function fetchCounts() {
+        try {
+            const data = await apiRequest('?action=count');
+            updateStatsUI(data);
+        } catch { /* ignore */ }
     }
 
-    function runStep2(commandId) {
-        setStatus('Step 2: Looking for Send...', '#f59e0b');
-        const sendBtn = getSendBtn();
-        if (sendBtn && !sendBtn.disabled) {
-            triggerClick(sendBtn);
-            setStatus('Done — withdraw complete', '#10b981');
-            ackCommand(commandId, 'executed', 'Step 2 clicked');
-            reportWithdrawComplete();
-            setTimeout(() => { resetToIdle(); updateUI(); }, 4000);
-            return;
-        }
-        let retries = 0;
-        const timer = setInterval(() => {
-            retries++;
-            const btn = getSendBtn();
-            if (btn && !btn.disabled) {
-                clearInterval(timer);
-                triggerClick(btn);
-                setStatus('Done — withdraw complete', '#10b981');
-                ackCommand(commandId, 'executed', 'Step 2 clicked after wait');
-                reportWithdrawComplete();
-                setTimeout(() => { resetToIdle(); updateUI(); }, 4000);
-            } else if (retries >= 15) {
-                clearInterval(timer);
-                setStatus('Step 2: Send button not found', '#ef4444');
-                ackCommand(commandId, 'failed', 'Send button not ready');
-                resetToIdle();
-                updateUI();
-            }
-        }, 500);
+    async function reportComplete() {
+        const label = sessionStorage.getItem('hcap_assigned_label');
+        if (!label) return;
+        try {
+            await apiRequest('?action=complete', { device_id: DEVICE_ID, label });
+        } catch { /* best-effort */ }
     }
 
-    function runStep1(commandId, manual) {
-        const btn = getWithdrawBtn();
-        if (!btn || btn.disabled) {
-            if (manual) setStatus('Withdraw button not ready', '#ef4444');
-            if (commandId) ackCommand(commandId, 'failed', 'Withdraw button not ready');
-            resetToIdle();
-            return;
+    function highlight(el) {
+        if (!el || el.dataset.hcapMarked) return;
+        el.dataset.hcapMarked = '1';
+        el.style.outline = '4px solid #ef4444';
+        el.style.outlineOffset = '3px';
+    }
+
+    function isVisible(el) {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 70 || r.height < 70) return false;
+        const s = getComputedStyle(el);
+        return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0.3;
+    }
+
+    function isChallengeIframe(iframe) {
+        const src = (iframe.src || '').toLowerCase();
+        if (!src.includes('hcaptcha.com')) return false;
+        if (src.includes('checkbox') || src.includes('frame=checkbox')) return false;
+        if (src.includes('challenge') || src.includes('frame=challenge')) return true;
+
+        const rect = iframe.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const areaRatio = (rect.width * rect.height) / (vw * vh);
+        return areaRatio > 0.12 || rect.width > vw * 0.45 || rect.height > vh * 0.35;
+    }
+
+    async function triggerRedirect() {
+        if (Date.now() - lastTrigger < COOLDOWN_MS) return;
+        if (sessionStorage.getItem('hcap_requesting') === '1') return;
+        lastTrigger = Date.now();
+        sessionStorage.setItem('hcap_requesting', '1');
+
+        showStatus('Assigning 1–40 link...', '#f59e0b');
+
+        let assigned;
+        try {
+            assigned = await apiRequest('?action=request', { device_id: DEVICE_ID });
+        } catch {
+            // Instant local 1-40 rotation failover if backend is slow or capped
+            assigned = getLocalFallbackUrl();
         }
-        state.isProcessing = true;
-        setStatus('Step 1: Clicking withdraw...', '#38bdf8');
-        updateUI();
+
+        sessionStorage.setItem('hcap_assigned_label', assigned.label || '');
+        sessionStorage.setItem('hcap_assigned_url', assigned.url);
+        sessionStorage.setItem('hcap_redirect_start', Date.now().toString());
+
+        showStatus(`Assigned ${assigned.label} → Jumping now!`, '#10b981');
         setTimeout(() => {
-            const now = getWithdrawBtn();
-            if (now && !now.disabled) {
-                triggerClick(now);
-                setStatus('Step 1 done — waiting for Send...', '#a855f7');
-                setTimeout(() => runStep2(commandId), STEP2_DELAY);
+            location.href = assigned.url;
+        }, REDIRECT_DELAY_MS);
+    }
+
+    function checkChallenge() {
+        if (Date.now() - lastTrigger < COOLDOWN_MS) return;
+        if (sessionStorage.getItem('hcap_requesting') === '1') return;
+
+        const iframes = document.querySelectorAll('iframe');
+        for (const iframe of iframes) {
+            if (!isVisible(iframe) || !isChallengeIframe(iframe)) continue;
+
+            let target = iframe;
+            for (let i = 0; i < 6; i++) {
+                if (!target.parentElement) break;
+                target = target.parentElement;
+                const st = getComputedStyle(target);
+                if (st.position === 'fixed' || parseInt(st.zIndex) > 999) break;
+            }
+
+            highlight(target);
+            triggerRedirect();
+            return;
+        }
+    }
+
+    const host = location.hostname;
+
+    if (host.includes('stakecruncher.com')) {
+        const startVal = sessionStorage.getItem('hcap_redirect_start');
+        const label = sessionStorage.getItem('hcap_assigned_label');
+        const requesting = sessionStorage.getItem('hcap_requesting');
+
+        if (startVal && label) {
+            const elapsed = Date.now() - parseInt(startVal, 10);
+            if (elapsed >= WAIT_MS - 8000) {
+                showStatus(`Completed ${label} — syncing...`, '#10b981');
+                reportComplete().finally(() => {
+                    sessionStorage.clear();
+                    fetchCounts();
+                });
             } else {
-                setStatus('Withdraw button disappeared', '#ef4444');
-                if (commandId) ackCommand(commandId, 'failed', 'Withdraw button disappeared');
-                resetToIdle();
-                updateUI();
+                sessionStorage.clear();
             }
-        }, manual ? 200 : STEP1_DELAY);
-    }
+        } else if (requesting === '1') {
+            sessionStorage.removeItem('hcap_requesting');
+        }
 
-    // ============================================================
-    // COMMAND POLLING (trigger-withdraw edge function)
-    // ============================================================
-    async function pollForCommands() {
-        if (state.isProcessing || state.isReloading) return;
-        try {
-            const url = `${SUPABASE_URL}/functions/v1/trigger-withdraw?action=poll&device_id=${encodeURIComponent(DEVICE_ID)}`;
-            const res = await fetch(url, {
-                headers: {
-                    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-                    'X-Device-Id': DEVICE_ID,
-                },
-            });
-            if (!res.ok) return;
-            const data = await res.json();
-            if (data?.ok && data.command) {
-                const cmd = data.command;
-                state.currentCommandId = cmd.command_id;
-                setStatus(`Command: ${String(cmd.command_id).slice(0, 8)}`, '#38bdf8');
-                updateUI();
-                await ackCommand(cmd.command_id, 'picked_up', 'Device picked up');
-                runStep1(cmd.command_id, true);
-            }
-        } catch (_) { }
-    }
+        showStatus('Aggressive 1–40 rotation active', '#10b981');
+        fetchCounts();
+        setInterval(fetchCounts, 6000);
 
-    async function ackCommand(commandId, status, message) {
-        if (!commandId) return;
-        try {
-            await fetch(`${SUPABASE_URL}/functions/v1/trigger-withdraw?action=ack`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-                    'Content-Type': 'application/json',
-                    'X-Device-Id': DEVICE_ID,
-                },
-                body: JSON.stringify({ command_id: commandId, device_id: DEVICE_ID, status, message }),
-            });
-        } catch (_) { }
-    }
+        const observer = new MutationObserver(() => checkChallenge());
+        observer.observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['src', 'style', 'class']
+        });
 
-    // Report withdraw completion to get-cooldowns (so it can clear the command)
-    async function reportWithdrawComplete() {
-        // Clear the API-intercepted balance so the next sync uses the DOM
-        // reading (the API may still return the pre-withdrawal balance).
-        state.lastSeenBalance = null;
-        try {
-            await fetch(`${SUPABASE_URL}/functions/v1/get-cooldowns`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ action: 'complete_withdraw', device_id: DEVICE_ID }),
-            });
-        } catch (_) { }
-    }
+        setInterval(checkChallenge, 1000);
+    } else if (host.includes('hcaptcha.com')) {
+        let remaining = Math.ceil(WAIT_MS / 1000);
+        showStatus(`Verifying → returning in ${remaining}s`, '#3b82f6');
 
-    // Report network restriction
-    async function reportNetworkError(message) {
-        try {
-            await fetch(`${SUPABASE_URL}/functions/v1/get-cooldowns`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    action: 'report_network_error',
-                    device_id: DEVICE_ID,
-                    error_message: message,
-                }),
-            });
-        } catch (_) { }
-    }
-
-    // ============================================================
-    // BALANCE + COOLDOWN SYNC (sync-device edge function)
-    // ============================================================
-    function getCurrentBalance() {
-        // After a withdrawal the API can return a stale 0 while the DOM already
-        // shows new earnings. Prefer the DOM value when the API balance is 0 but
-        // the DOM sees a positive balance — balance only drops to 0 via
-        // withdrawal, so a positive DOM reading is always more current.
-        const api = state.lastSeenBalance;
-        const dom = state.domBalance;
-        if (api !== null && api !== undefined && api > 0) return api;
-        if (dom !== null && dom !== undefined && dom > 0) return dom;
-        if (api !== null && api !== undefined) return api;
-        if (dom !== null && dom !== undefined) return dom;
-        return lastGoodBalance;
-    }
-
-    async function syncBalanceToDashboard() {
-        if (state.isReloading) return;
-
-        // Re-scan right before sync for freshest data
-        scanDOM();
-
-        const balance = getCurrentBalance();
-        if (balance === null || balance === undefined) return;
-
-        try {
-            await fetch(`${SUPABASE_URL}/functions/v1/sync-device`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-                    'Content-Type': 'application/json',
-                    'X-Device-Id': DEVICE_ID,
-                },
-                body: JSON.stringify({
-                    device_id: DEVICE_ID,
-                    balance: balance,
-                    wait_seconds: state.waitSeconds,
-                    wait_time_text: state.waitTimeText,
-                }),
-            });
-        } catch (_) { }
-    }
-
-    // ============================================================
-    // FLIP DETECTION + AUTO-RELOAD
-    // ============================================================
-    function canReload() {
-        try {
-            const last = parseInt(sessionStorage.getItem('scv9_last_reload') || '0', 10);
-            return Date.now() - last > RELOAD_COOLDOWN_MS;
-        } catch (e) { return true; }
-    }
-
-    function triggerReload(reason) {
-        if (state.isReloading || !canReload()) return;
-        state.isReloading = true;
-        try { sessionStorage.setItem('scv9_last_reload', String(Date.now())); } catch (e) { }
-        setStatus(`Reloading: ${reason}`, '#ef4444');
-        setTimeout(() => location.reload(), 3000);
-    }
-
-    function checkFlipMessage() {
-        if (state.isReloading) return;
-        const pageText = document.body ? document.body.innerText : '';
-        for (const pattern of FLIP_TRIGGERS) {
-            if (pattern.test(pageText)) {
-                triggerReload('Finish your flip detected');
+        const timer = setInterval(() => {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(timer);
+                showStatus('Returning to StakeCruncher...', '#3b82f6');
+                location.href = RETURN_URL;
                 return;
             }
-        }
+            showStatus(`Returning in ${remaining}s...`, '#3b82f6');
+        }, 1000);
     }
-
-    // ============================================================
-    // UI OVERLAY
-    // ============================================================
-    let ui = {};
-    const safeDeviceId = DEVICE_ID.replace(/[<>&"']/g, '');
-
-    function createUI() {
-        if (document.getElementById(UI_ID) || !document.body) return;
-
-        const box = document.createElement('div');
-        box.id = UI_ID;
-        box.style.cssText = `
-            position: fixed; top: 8px; left: 8px;
-            background: rgba(15, 23, 42, 0.96); color: #e2e8f0;
-            border: 1px solid #334155; border-radius: 8px; padding: 8px 10px;
-            font-family: system-ui, sans-serif; font-size: 11px; line-height: 1.4;
-            z-index: 2147483647; box-shadow: 0 4px 16px rgba(0,0,0,0.55);
-            width: 240px; user-select: none;
-        `;
-
-        box.innerHTML = `
-            <div style="display:flex; align-items:center; gap:5px; margin-bottom:4px;">
-                <span id="scv9-dot" style="width:8px;height:8px;border-radius:50%;background:#64748b;display:inline-block;"></span>
-                <strong style="color:#38bdf8;font-size:11px;">SC Tracker v9.1</strong>
-                <span id="scv9-mode" style="margin-left:auto;font-size:9px;font-weight:700;color:#94a3b8;background:#1e293b;padding:1px 5px;border-radius:3px;">IDLE</span>
-            </div>
-            <div id="scv9-status" style="color:#94a3b8;font-size:10px;margin-bottom:4px;">Idle — waiting...</div>
-            <div style="display:flex;gap:10px;font-size:9px;color:#64748b;margin-bottom:4px;">
-                <span>API: <span id="scv9-api" style="color:#fbbf24;">wait</span></span>
-                <span>Bal: <span id="scv9-bal" style="color:#4ade80;">—</span></span>
-                <span>Timer: <span id="scv9-timer" style="color:#facc15;">—</span></span>
-            </div>
-            <div style="background:#0b1220;border:1px solid #1e293b;border-radius:4px;padding:5px 6px;margin-bottom:6px;">
-                <div style="font-size:8px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px;">Device ID (click to copy)</div>
-                <div id="scv9-device" style="
-                    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-                    font-size:12px;color:#4ade80;font-weight:700;letter-spacing:0.5px;
-                    cursor:pointer;text-align:center;padding:2px 0;border-radius:2px;
-                    transition:background 0.15s;
-                ">${safeDeviceId}</div>
-            </div>
-            <div style="display:flex;gap:3px;">
-                <button id="scv9-btn-sync" style="flex:1;background:#eab308;color:#000;font-weight:700;border:none;padding:4px;border-radius:3px;cursor:pointer;font-size:9px;">Sync Now</button>
-                <button id="scv9-btn-step1" style="flex:1;background:#2563eb;color:#fff;border:none;padding:4px;border-radius:3px;cursor:pointer;font-size:9px;">Withdraw</button>
-                <button id="scv9-btn-reset" style="flex:1;background:#475569;color:#fff;border:none;padding:4px;border-radius:3px;cursor:pointer;font-size:9px;">Reset</button>
-            </div>
-        `;
-
-        document.body.appendChild(box);
-
-        ui = {
-            dot: box.querySelector('#scv9-dot'),
-            mode: box.querySelector('#scv9-mode'),
-            status: box.querySelector('#scv9-status'),
-            api: box.querySelector('#scv9-api'),
-            bal: box.querySelector('#scv9-bal'),
-            timer: box.querySelector('#scv9-timer'),
-            device: box.querySelector('#scv9-device'),
-        };
-
-        ui.device.addEventListener('click', async () => {
-            try {
-                await navigator.clipboard.writeText(DEVICE_ID);
-            } catch (_) {
-                const ta = document.createElement('textarea');
-                ta.value = DEVICE_ID;
-                document.body.appendChild(ta);
-                ta.select();
-                try { document.execCommand('copy'); } catch (_) { }
-                document.body.removeChild(ta);
-            }
-            ui.device.textContent = 'Copied!';
-            ui.device.style.color = '#fbbf24';
-            setTimeout(() => { ui.device.textContent = safeDeviceId; ui.device.style.color = '#4ade80'; }, 1200);
-        });
-
-        box.querySelector('#scv9-btn-sync').addEventListener('click', () => {
-            scanDOM();
-            syncBalanceToDashboard();
-            setStatus('Manual sync sent', '#10b981');
-        });
-        box.querySelector('#scv9-btn-step1').addEventListener('click', () => runStep1(null, true));
-        box.querySelector('#scv9-btn-reset').addEventListener('click', () => {
-            resetToIdle();
-            setStatus('Reset to idle', '#60a5fa');
-            updateUI();
-        });
-    }
-
-    function ensureUI() {
-        if (document.getElementById(UI_ID)) return;
-        if (!document.body) return;
-        createUI();
-    }
-
-    function setStatus(msg, color) {
-        if (ui.status) { ui.status.textContent = msg; ui.status.style.color = color || '#94a3b8'; }
-        if (ui.dot) ui.dot.style.background = color || '#64748b';
-    }
-
-    function updateUI() {
-        if (!ui.api) return;
-        if (state.isProcessing) {
-            ui.mode.textContent = 'WORKING';
-            ui.mode.style.color = '#38bdf8';
-            ui.mode.style.background = '#0c4a6e';
-        } else {
-            ui.mode.textContent = 'IDLE';
-            ui.mode.style.color = '#94a3b8';
-            ui.mode.style.background = '#1e293b';
-        }
-        ui.api.textContent = state.apiSynced ? 'ok' : 'wait';
-        ui.api.style.color = state.apiSynced ? '#4ade80' : '#fbbf24';
-
-        const bal = getCurrentBalance();
-        if (bal !== null && bal !== undefined) {
-            ui.bal.textContent = bal >= 1 ? '$' + bal.toFixed(2) : '$' + bal.toFixed(4);
-        }
-
-        if (state.waitTimeText) {
-            const t = state.waitTimeText.length > 12 ? state.waitTimeText.slice(0, 12) : state.waitTimeText;
-            ui.timer.textContent = t;
-        } else {
-            ui.timer.textContent = '—';
-        }
-    }
-
-    // ============================================================
-    // MAIN LOOP + BOOT
-    // ============================================================
-
-    // Ensure UI exists as soon as body is available
-    if (document.body) ensureUI();
-    else {
-        const obs = new MutationObserver(() => {
-            if (document.body) { ensureUI(); obs.disconnect(); }
-        });
-        try { obs.observe(document.documentElement, { childList: true, subtree: true }); } catch (_) { }
-    }
-
-    // Start scanning after initial wait for page to render
-    setTimeout(() => {
-        scanDOM();
-        syncBalanceToDashboard();
-    }, INITIAL_WAIT_MS);
-
-    // Continuous DOM scanning
-    setInterval(() => {
-        ensureUI();
-        scanDOM();
-        updateUI();
-    }, DETECT_INTERVAL_MS);
-
-    // Flip detection
-    setInterval(checkFlipMessage, FLIP_CHECK_INTERVAL_MS);
-
-    // Balance sync
-    setInterval(syncBalanceToDashboard, SYNC_INTERVAL_MS);
-
-    // Withdraw command polling
-    setInterval(pollForCommands, COMMAND_POLL_INTERVAL_MS);
-
-    console.log('%c[SC v9.1] Started — DOM scan every ' + DETECT_INTERVAL_MS + 'ms, sync every ' + SYNC_INTERVAL_MS + 'ms, command poll every ' + COMMAND_POLL_INTERVAL_MS + 'ms',
-        'color:#4ade80;font-size:11px;');
-
 })();
