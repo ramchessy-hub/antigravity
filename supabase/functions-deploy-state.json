@@ -2,8 +2,8 @@
   "projectId": "71851426",
   "functions": {
     "assign-hcaptcha": {
-      "hasChanged": true,
-      "hash": ""
+      "hasChanged": false,
+      "hash": "152d6191de437dd47e01b804dbf503f258e33758d5d950ad5662e25619f6189e"
     },
     "check-device-offline": {
       "hasChanged": false,
