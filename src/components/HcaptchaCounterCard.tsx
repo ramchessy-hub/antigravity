@@ -81,13 +81,7 @@ export function HcaptchaCounterCard() {
   const total = Math.max(TOTAL_ROTATION_URLS, data?.total_available ?? 0, Object.keys(usage).length);
   const cycle = data?.cycle ?? Math.floor(assigned / total) + 1;
 
-  let doneLinks = 0;
-  let pendingLinks = 0;
-  for (let i = 1; i <= total; i++) {
-    const st = chipState(usage[`URL_${i}`], hasData);
-    if (st === 'done') doneLinks++;
-    else if (st === 'pending' || st === 'active') pendingLinks++;
-  }
+  const notFinished = Math.max(0, assigned - completed);
 
   const chipList = Array.from({ length: total }, (_, i) => {
     const label = `URL_${i + 1}`;
@@ -133,7 +127,7 @@ export function HcaptchaCounterCard() {
                 <div className="text-[9px] uppercase tracking-wide text-slate-500">Completed</div>
               </div>
               <div className="rounded-md bg-slate-950/60 border border-slate-800 py-1.5">
-                <div className="text-sm font-bold text-rose-300 tnum">{pendingLinks}</div>
+                <div className="text-sm font-bold text-rose-300 tnum">{notFinished}</div>
                 <div className="text-[9px] uppercase tracking-wide text-slate-500">Not finished</div>
               </div>
             </div>
