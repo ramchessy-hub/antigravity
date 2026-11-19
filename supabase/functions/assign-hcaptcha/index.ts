@@ -50,7 +50,7 @@ const HCAPTCHA_URLS: { label: string; url: string }[] = [
   { label: "URL_40", url: "https://accounts.hcaptcha.com/verify_email/7f42fe13-9445-4516-a0b5-7547832fce83" },
 ];
 
-const ACTIVE_COOLDOWN_MS = 65 * 1000; // 65s lock while a VM is actively on the link
+const ACTIVE_COOLDOWN_MS = 65 * 1000; // only used for "running now" display, never blocks assignment
 
 function todayStart(): string {
   const now = new Date();
@@ -68,14 +68,13 @@ async function assignUrl(supabase: ReturnType<typeof createClient>, deviceId: st
 
   const stats = new Map<
     string,
-    { count: number; lastAssignedMs: number; isBusy: boolean; index: number }
+    { count: number; lastAssignedMs: number; index: number }
   >();
 
   HCAPTCHA_URLS.forEach((u, idx) => {
-    stats.set(u.label, { count: 0, lastAssignedMs: 0, isBusy: false, index: idx });
+    stats.set(u.label, { count: 0, lastAssignedMs: 0, index: idx });
   });
 
-  const nowMs = Date.now();
   for (const r of rows ?? []) {
     const label = String(r.url_label || "").trim();
     const entry = stats.get(label);
@@ -83,39 +82,44 @@ async function assignUrl(supabase: ReturnType<typeof createClient>, deviceId: st
     entry.count++;
     const ts = r.assigned_at ? new Date(r.assigned_at).getTime() : 0;
     if (ts > entry.lastAssignedMs) entry.lastAssignedMs = ts;
-    if (r.status === "assigned" && nowMs - ts < ACTIVE_COOLDOWN_MS) {
-      entry.isBusy = true;
-    }
   }
 
-  // Aggressive ranking:
-  // 1. Not currently busy in the last 65s
-  // 2. Lowest usage count today (ensures strict 1->40 sweep before next cycle)
-  // 3. Natural index 1->40 order
+  // Least-assigned first, ties broken by least-recently-used, then natural 1->40 order.
   const ranked = [...HCAPTCHA_URLS].sort((a, b) => {
     const sa = stats.get(a.label)!;
     const sb = stats.get(b.label)!;
-    if (sa.isBusy !== sb.isBusy) return sa.isBusy ? 1 : -1;
     if (sa.count !== sb.count) return sa.count - sb.count;
     if (sa.lastAssignedMs !== sb.lastAssignedMs) return sa.lastAssignedMs - sb.lastAssignedMs;
     return sa.index - sb.index;
   });
 
-  const selected = ranked[0];
-  const selectedStats = stats.get(selected.label)!;
-  const nowIso = new Date(nowMs).toISOString();
+  const nowIso = new Date().toISOString();
 
-  await supabase.from("hcaptcha_assignments").insert({
-    device_id: deviceId,
-    url_label: selected.label,
-    assigned_at: nowIso,
-    status: "assigned",
-  });
+  // Double-check: try the top candidates in order until the insert is confirmed saved.
+  for (let i = 0; i < Math.min(3, ranked.length); i++) {
+    const candidate = ranked[i];
+    const { error } = await supabase.from("hcaptcha_assignments").insert({
+      device_id: deviceId,
+      url_label: candidate.label,
+      assigned_at: nowIso,
+      status: "assigned",
+    });
+    if (!error) {
+      return {
+        url: candidate.url,
+        label: candidate.label,
+        cycle: stats.get(candidate.label)!.count + 1,
+        total_available: HCAPTCHA_URLS.length,
+      };
+    }
+  }
 
+  // Last resort: serve the top-ranked link even if logging failed, so a device is never left waiting.
+  const fallback = ranked[0];
   return {
-    url: selected.url,
-    label: selected.label,
-    cycle: selectedStats.count + 1,
+    url: fallback.url,
+    label: fallback.label,
+    cycle: stats.get(fallback.label)!.count + 1,
     total_available: HCAPTCHA_URLS.length,
   };
 }
