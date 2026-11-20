@@ -14,6 +14,7 @@ import {
   Thermometer,
   Snowflake,
   Flame,
+  Link2 as LinkIcon,
 } from 'lucide-react';
 import { supabase, type Device, type CocoBalance, type SolanaWalletCheck, type BalanceClaim, type DeviceWithdrawal } from '@/lib/supabase';
 import type { DashboardStats, EarningsSummary } from '@/types';
@@ -36,6 +37,7 @@ import { ClaimsHistoryDrawer } from '@/components/ClaimsHistoryDrawer';
 import { PowerConsumptionCard } from '@/components/PowerConsumptionCard';
 import { UpcomingDeviceCard } from '@/components/UpcomingDeviceCard';
 import { HcaptchaCounterCard } from '@/components/HcaptchaCounterCard';
+import { HcaptchaLinksPage } from '@/components/HcaptchaLinksPage';
 import { MissedCycleBanner } from '@/components/MissedCycleBanner';
 import { RunIssueBanner } from '@/components/RunIssueBanner';
 
@@ -146,6 +148,7 @@ function App() {
     return stored === null ? true : stored === 'true';
   });
   const [showDownloads, setShowDownloads] = useState(false);
+  const [showHcaptchaLinks, setShowHcaptchaLinks] = useState(false);
   const [battery, setBattery] = useState<BatteryReport | null>(null);
   const [showBatteryHistory, setShowBatteryHistory] = useState(false);
   const [showTempDrawer, setShowTempDrawer] = useState(false);
@@ -987,6 +990,14 @@ function App() {
               siteUptimeMs={siteUptime}
             />
             <HcaptchaCounterCard />
+            <button
+              onClick={() => setShowHcaptchaLinks(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-sky-500/20 bg-sky-950/30 transition-all hover:bg-sky-900/40"
+              title="Manage hCaptcha links — add, edit, delete, reorder"
+            >
+              <LinkIcon className="w-3.5 h-3.5 text-sky-400" />
+              <span className="text-[11px] font-semibold text-slate-300">Links</span>
+            </button>
             <div className="hidden xs:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
               <span className="relative flex w-1.5 h-1.5">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
@@ -1391,6 +1402,9 @@ function App() {
       {showDownloads && (
         <DownloadsPage onClose={() => setShowDownloads(false)} />
       )}
+
+      {/* hCaptcha links manager */}
+      <HcaptchaLinksPage open={showHcaptchaLinks} onClose={() => setShowHcaptchaLinks(false)} />
     </div>
   );
 }
